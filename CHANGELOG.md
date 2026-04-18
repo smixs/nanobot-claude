@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 — tool use
+
+* Shim now invokes `claude -p` with `--dangerously-skip-permissions` so the
+  agent can use Read / Bash / Edit / Write / WebFetch / WebSearch without
+  interactive confirmation (required for headless operation).
+* SECURITY: combined with `--dangerously-skip-permissions`, nanobot's
+  `allowFrom: ["*"]` becomes an RCE surface. Updated docs to require
+  narrowing `allowFrom` to specific Telegram user_ids.
+
 ## 0.1.0 — initial working shape
 
 * OpenAI-compat shim (`shim/server.py`) forwarding `/v1/chat/completions`

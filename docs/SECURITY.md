@@ -43,6 +43,37 @@ screenshot, support ticket), rotate it:
   `~/.claude/.credentials.json`. (The shim picks up the new creds with no
   restart because `claude` re-reads the file per invocation.)
 
+## Agent tool permissions (READ THIS)
+
+The shim passes `--dangerously-skip-permissions` to `claude -p`. That means
+the agent can use **Bash, Read, Write, Edit, WebFetch, WebSearch** with no
+per-call confirmation. Any prompt that reaches the shim can ask the agent
+to run arbitrary shell commands as the VPS user.
+
+Because the shim has no auth of its own, *anyone who can POST to
+`127.0.0.1:8787/v1/chat/completions`* can run code on the VPS. On the
+default install that surface is reached through the Telegram bot, so the
+effective perimeter is your nanobot `allowFrom` list.
+
+**Never ship with `allowFrom: ["*"]`.** Set it to a list of your Telegram
+user_ids (look at a nanobot log line like
+`Telegram message from 7091451031|shimaoz` to find yours):
+
+```jsonc
+"channels": {
+  "telegram": {
+    "allowFrom": ["7091451031"],   // your ID, nobody else
+    ...
+  }
+}
+```
+
+If you need a multi-user deployment, replace
+`--dangerously-skip-permissions` in `shim/server.py` with an
+`--allowed-tools` whitelist such as `Read Glob Grep WebFetch WebSearch`
+(no Bash, no Write), so an abusive message cannot escalate to code
+execution.
+
 ## Transport
 
 * Shim listens on loopback only. No TLS — it's local, trust boundary is

@@ -214,6 +214,39 @@ its session + MCP cache. Easiest fix is **internal retry inside the shim**:
 up to 3 retries, ~1–2 s each, before returning. nanobot never sees the
 empty answer, users never see "Empty response on turn 0".
 
+#### 3.5 Tool use (Read/Bash/WebFetch) blocked in headless mode
+
+Without flags, `claude -p` boots with permission gates enabled, and every
+tool call would pop an interactive confirmation — which never arrives in
+headless mode. Agent gracefully refuses: "I don't have permission to read
+files." The fix is to pass `--dangerously-skip-permissions` to the CLI.
+
+**SECURITY:** that flag is exactly as scary as its name. Combined with a
+Telegram channel where `allowFrom: ["*"]`, it turns your bot into a
+remote code execution endpoint for anyone who finds the bot handle.
+
+The correct pairing is:
+
+```jsonc
+// ~/.nanobot/config.json
+"channels": {
+  "telegram": {
+    "enabled": true,
+    "allowFrom": ["123456789"],   // your Telegram user_id; never "*" in production
+    ...
+  }
+}
+```
+
+Find your Telegram user_id by sending any message to the bot and reading
+nanobot's log: `Telegram message from <id>|<username>`.
+
+The repo's shim hard-codes `--dangerously-skip-permissions` in
+`shim/server.py` because the primary use case is a single-user personal
+assistant. If you deploy multi-user, wrap the cmd in an `--allowed-tools`
+whitelist instead (e.g. `Read Glob Grep WebFetch WebSearch`) and leave
+`Bash` / `Edit` / `Write` out.
+
 ## 4. What NOT to do, summarized
 
 | Attempt                                             | Outcome                          |

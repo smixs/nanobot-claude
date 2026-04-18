@@ -1,0 +1,17 @@
+[Unit]
+Description=nanobot gateway (Telegram etc.) talking to claude-code-shim
+After=network-online.target claude-shim.service
+Wants=network-online.target
+Requires=claude-shim.service
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.nanobot/secrets.env
+ExecStart=%h/.local/bin/nanobot gateway --config %h/.nanobot/config.json
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:%h/.local/state/nanobot/nanobot.log
+StandardError=append:%h/.local/state/nanobot/nanobot.log
+
+[Install]
+WantedBy=default.target

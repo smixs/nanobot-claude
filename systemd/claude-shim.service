@@ -1,0 +1,22 @@
+[Unit]
+Description=Claude Code OpenAI-compat shim (backend for nanobot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nanobot-claude-oauth/shim
+Environment="CLAUDE_BIN=%h/.local/bin/claude"
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# Strip any outer HTTP(S)_PROXY so the child claude CLI talks directly to
+# api.anthropic.com with the trust store it expects.
+ExecStart=/usr/bin/env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+  %h/.local/bin/uv run --project %h/nanobot-claude-oauth/shim \
+  uvicorn server:app --host 127.0.0.1 --port 8787
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:%h/.local/state/claude-shim/shim.log
+StandardError=append:%h/.local/state/claude-shim/shim.log
+
+[Install]
+WantedBy=default.target

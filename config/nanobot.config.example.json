@@ -1,0 +1,26 @@
+{
+  "_comment": "Minimal patch on top of `nanobot onboard` defaults. Generate the full config with `nanobot onboard`, then apply the fields below via `jq` (see scripts/install.sh).",
+  "agents": {
+    "defaults": {
+      "model": "custom/claude-sonnet-4-6",
+      "provider": "auto",
+      "timezone": "Europe/Moscow"
+    }
+  },
+  "providers": {
+    "custom": {
+      "apiKey": "dummy-not-checked-by-shim",
+      "apiBase": "http://127.0.0.1:8787/v1",
+      "extraHeaders": null
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "__TELEGRAM_BOT_TOKEN__",
+      "allowFrom": ["*"],
+      "streaming": false,
+      "groupPolicy": "mention"
+    }
+  }
+}

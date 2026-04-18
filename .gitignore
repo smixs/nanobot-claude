@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv/
+*.egg-info/
+
+# State / secrets (never commit real tokens)
+shim/shim.log
+*.log
+*.env
+secrets.env
+!config/secrets.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Lock file intentionally committed for reproducibility
+!uv.lock

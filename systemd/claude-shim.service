@@ -8,6 +8,13 @@ Type=simple
 WorkingDirectory=%h/nanobot-claude-oauth/shim
 Environment="CLAUDE_BIN=%h/.local/bin/claude"
 Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# 30 min per attempt — long enough for heavy tool-use tasks
+# (unpacking archives, multi-step file edits, etc.). Bump higher if
+# your agent commonly runs longer.
+Environment="CLAUDE_TIMEOUT_S=1800"
+# 2 internal retries. The main reason to retry is an empty-result
+# cold-start quirk; no need to burn a second 30-min timeout.
+Environment="MAX_INTERNAL_RETRIES=2"
 # Strip any outer HTTP(S)_PROXY so the child claude CLI talks directly to
 # api.anthropic.com with the trust store it expects.
 ExecStart=/usr/bin/env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \

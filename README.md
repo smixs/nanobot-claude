@@ -54,11 +54,10 @@ account from now on; never as root.
 # you'll use it to SSH in later). Hit Enter through the name/phone fields.
 adduser claude
 
-# Grant sudo rights WITHOUT a password prompt, so the installer can run
-# non-interactively. Remove this file later if you want stricter security.
+# Grant sudo rights. You'll type the password once at the start of the
+# bootstrap; sudo caches it (default 15 min) and the installer refreshes
+# the timestamp in the background so no further prompts appear.
 usermod -aG sudo claude
-echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude
-chmod 440 /etc/sudoers.d/claude
 
 # Keep user services alive after SSH logout. Must be run as root —
 # regular users cannot enable linger for themselves.
@@ -108,8 +107,10 @@ It then installs dependencies (`git`, `curl`, `jq`, `uv`), clones the
 repo into `~/nanobot-claude-oauth`, patches `~/.nanobot/config.json`
 to point at the local shim, installs and starts two systemd-user
 services (`claude-shim` on port 8787, `nanobot` on port 18790),
-and runs a smoke test. Total time ≈ 2 minutes. Sudo password is
-not prompted thanks to the NOPASSWD rule in step 2.
+and runs a smoke test. Total time ≈ 2 minutes. You'll be asked for
+your sudo password **once** at the very beginning — the installer
+caches it and refreshes the timestamp in the background, so no
+repeat prompts.
 
 ### 6. From now on, SSH in as `claude` — not root
 

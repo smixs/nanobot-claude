@@ -4,175 +4,231 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/smixs/nanobot-claude/main/scripts/bootstrap.sh | bash
 #
-# Prompts for Telegram token, model, and timezone via whiptail, then
-# delegates to scripts/install.sh with env vars set. Requires Claude
-# Code CLI to be pre-installed and signed in — that step needs a
-# browser-based OAuth flow which cannot be automated.
+# Plain-text prompts (no whiptail/ncurses) so it works on ANY terminal
+# that has bash + curl, including dumb TTYs, SSH-without-pty, containers.
+# Delegates to scripts/install.sh with env vars set. Requires Claude
+# Code CLI to be pre-installed and signed in — OAuth needs a browser,
+# which cannot be scripted.
+
 set -euo pipefail
+
+# ---------- 0. Make failures visible ----------
+# If anything exits non-zero, print WHERE and WHICH command failed.
+# Without this, `set -e` + subtle errors produce a silent exit that
+# looks like "nothing happened" — exactly what the old whiptail
+# version did on terminals that couldn't render ncurses dialogs.
+trap 'ec=$?; printf "\n\033[31m✗ bootstrap failed at line %s (exit %s)\n  command: %s\033[0m\n" "$LINENO" "$ec" "$BASH_COMMAND" >&2; exit "$ec"' ERR
+
+# ---------- 0a. First line of visible output (proves we got here) ----------
+# If you see NOTHING on screen, either curl couldn't reach GitHub, bash
+# didn't start, or your terminal is swallowing stdout. Try:
+#   curl -fsSL <url> -o /tmp/b.sh && bash -x /tmp/b.sh
+printf '\n\033[1m▶ nanobot-claude-oauth bootstrap\033[0m\n'
+printf '  shell=%s  user=%s  pwd=%s  term=%s\n\n' "${BASH_VERSION:-?}" "${USER:-?}" "$PWD" "${TERM:-unset}"
+
+# ---------- 0b. stdin handling for curl|bash ----------
+# When invoked via `curl | bash`, stdin is the pipe — any `read` would
+# block forever (or read the next line of the script, worse). Redirect
+# stdin to the controlling terminal.
+if [ -t 0 ]; then
+  echo "  stdin: interactive tty — no redirect needed"
+else
+  if [ ! -c /dev/tty ]; then
+    echo "✗ /dev/tty not available — bootstrap.sh needs a controlling terminal." >&2
+    echo "  Download and run directly instead:" >&2
+    echo "    curl -fsSL <url> -o bootstrap.sh && bash bootstrap.sh" >&2
+    exit 1
+  fi
+  echo "  stdin: piped — redirecting to /dev/tty for prompts"
+  exec < /dev/tty
+fi
 
 REPO_URL="${REPO_URL:-https://github.com/smixs/nanobot-claude.git}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/nanobot-claude-oauth}"
 
-# When invoked via `curl | bash`, stdin is the pipe — whiptail and any
-# `read` would block. Redirecting stdin to the controlling terminal
-# fixes that; used by rustup and oh-my-zsh for the same reason.
-[ -t 0 ] || exec < /dev/tty
+# ---------- 1. Explain sudo usage and cache credentials ----------
+cat <<'EOF'
 
-# ---------- 1. Bootstrap whiptail itself (needed for all subsequent TUI) ----------
-if ! command -v whiptail >/dev/null; then
-  echo "▶ Installing TUI dependency (whiptail)..."
-  if command -v apt-get >/dev/null; then
-    sudo apt-get update -qq
-    sudo apt-get install -y whiptail
-  elif command -v dnf >/dev/null; then
-    sudo dnf install -y newt
-  else
-    echo "ERROR: unsupported distro. Install whiptail (Debian/Ubuntu) or newt (RHEL) manually." >&2
-    exit 1
-  fi
-fi
+==> This installer needs sudo for two things:
+      • apt-get / dnf install  (git, curl, jq if missing)
+      • loginctl enable-linger (services survive logout)
 
-# ---------- 2. Explain sudo usage in TUI, then cache credentials ----------
-whiptail --title "Nanobot-Claude installer" --msgbox "\
-This installer needs sudo for:
+    Your password will be asked ONCE and cached (~15 min).
+    No further prompts after that.
 
- • apt-get install (git, curl, jq if missing)
- • loginctl enable-linger (services survive logout)
-
-Your sudo password will be requested ONCE and cached (~15 min)
-for the rest of the install. No further prompts." 14 70
+EOF
 
 if ! sudo -v; then
-  whiptail --msgbox "sudo is required. Aborting." 8 50
+  echo "✗ sudo required. Aborting." >&2
   exit 1
 fi
 
-# Keep the sudo timestamp fresh for the entire run.
+# Keep the sudo timestamp fresh while this script runs.
 ( while true; do sudo -n true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done ) &
 SUDO_KEEPALIVE_PID=$!
 trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT
 
-# ---------- 3. Install system dependencies ----------
+# ---------- 2. System dependencies ----------
 ensure_deps() {
   local need=()
   for bin in git curl jq; do
     command -v "$bin" >/dev/null || need+=("$bin")
   done
-  [ ${#need[@]} -eq 0 ] && return 0
+  if [ ${#need[@]} -eq 0 ]; then
+    echo "✓ git / curl / jq already installed"
+    return 0
+  fi
 
+  echo "▶ Installing missing packages: ${need[*]}"
   if command -v apt-get >/dev/null; then
+    sudo apt-get update -qq
     sudo apt-get install -y "${need[@]}"
   elif command -v dnf >/dev/null; then
     sudo dnf install -y "${need[@]}"
   else
-    whiptail --msgbox "Unsupported distro. Install manually: ${need[*]}" 10 60
+    echo "✗ Unsupported distro. Install manually: ${need[*]}" >&2
     exit 1
   fi
 }
 ensure_deps
 
-# ---------- 4. uv (Python package manager — needed by install.sh) ----------
+# ---------- 3. uv (Python tool manager — needed by install.sh) ----------
 if ! command -v uv >/dev/null; then
-  echo "▶ Installing uv..."
+  echo "▶ Installing uv (Astral)..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 export PATH="$HOME/.local/bin:$PATH"
+echo "✓ uv: $(command -v uv)"
 
-# ---------- 5. Hard checks: claude CLI + credentials ----------
-# We intentionally do NOT auto-install claude-code: its OAuth login
-# requires a browser, which cannot be scripted. Fail clearly instead.
+# ---------- 4. Hard checks: claude CLI + credentials ----------
+# Claude Code cannot be installed unattended — OAuth needs a browser.
+# Fail clearly with the exact commands to run.
 if ! command -v claude >/dev/null; then
-  whiptail --msgbox "\
-Claude Code CLI is not installed.
+  cat >&2 <<'EOF'
 
-Install it first:
-    npm install -g @anthropic-ai/claude-code
+✗ Claude Code CLI is not installed.
 
-Then sign in (opens a browser):
-    claude
+  Install it first:
+      npm install -g @anthropic-ai/claude-code
 
-Re-run this bootstrap afterwards." 14 70
+  Then sign in (opens a browser for Pro/Max OAuth):
+      claude
+
+  Re-run this bootstrap afterwards.
+EOF
   exit 1
 fi
 if [ ! -f "$HOME/.claude/.credentials.json" ]; then
-  whiptail --msgbox "\
-Claude CLI is installed but not signed in.
+  cat >&2 <<'EOF'
 
-Run:
-    claude
+✗ Claude CLI is installed but not signed in.
 
-Complete the OAuth flow (Pro/Max subscription) in your browser,
-then re-run this bootstrap." 14 70
+  Run:
+      claude
+  Complete the OAuth flow (Pro/Max) in your browser, then re-run.
+EOF
   exit 1
 fi
+echo "✓ claude: $(command -v claude)"
 
-# ---------- 6. Clone or update the repo ----------
+# ---------- 5. Clone or update the repo ----------
 if [ -d "$INSTALL_DIR/.git" ]; then
-  echo "▶ Repo already present — pulling latest"
+  echo "▶ Repo already at $INSTALL_DIR — git pull --ff-only"
   git -C "$INSTALL_DIR" pull --ff-only
 else
-  echo "▶ Cloning $REPO_URL into $INSTALL_DIR"
+  echo "▶ Cloning $REPO_URL -> $INSTALL_DIR"
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-# ---------- 7. Interactive wizard ----------
-TG_TOKEN=$(whiptail --title "Step 1 of 3 — Telegram" --inputbox "\
-Telegram Bot Token (from @BotFather).
+# ---------- 6. Interactive wizard (plain-text prompts) ----------
+cat <<'EOF'
 
-Leave blank to skip the Telegram channel — you can always
-add it later by editing ~/.nanobot/config.json." \
-  12 70 "" 3>&1 1>&2 2>&3) || exit 1
+============================================================
+  Configuration — 3 questions
+============================================================
 
-MODEL=$(whiptail --title "Step 2 of 3 — Model" --menu \
-  "Choose the Claude model nanobot will use:" \
-  15 65 3 \
-  "claude-sonnet-4-6" "Balanced — good default for a chat bot" \
-  "claude-opus-4-7"   "Smartest, more expensive, slower" \
-  "claude-haiku-4-5"  "Fastest, cheapest, lower quality" \
-  3>&1 1>&2 2>&3) || exit 1
+EOF
 
-TZ=$(whiptail --title "Step 3 of 3 — Timezone" --menu \
-  "Choose an IANA timezone for the agent:" \
-  20 60 11 \
-  "UTC"                 "Coordinated Universal Time" \
-  "Europe/Moscow"       "Moscow" \
-  "Europe/London"       "London" \
-  "Europe/Berlin"       "Berlin / Central Europe" \
-  "America/New_York"    "New York / US Eastern" \
-  "America/Los_Angeles" "Los Angeles / US Pacific" \
-  "Asia/Tashkent"       "Tashkent" \
-  "Asia/Dubai"          "Dubai / Gulf" \
-  "Asia/Tokyo"          "Tokyo" \
-  "Asia/Shanghai"       "Shanghai" \
-  "Other"               "Enter an IANA name manually" \
-  3>&1 1>&2 2>&3) || exit 1
-if [ "$TZ" = "Other" ]; then
-  TZ=$(whiptail --inputbox "Enter IANA timezone (e.g. Pacific/Auckland):" \
-    10 60 "UTC" 3>&1 1>&2 2>&3) || exit 1
-fi
+# --- 6.1 Telegram bot token ---
+cat <<'EOF'
+1/3.  Telegram bot token (from @BotFather).
+      Leave BLANK to skip — you can add it later in ~/.nanobot/config.json.
 
-# ---------- 8. Enable linger so services survive logout ----------
-if ! loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q Linger=yes; then
+EOF
+read -rp "      Token: " TG_TOKEN
+echo ""
+
+# --- 6.2 Model ---
+cat <<'EOF'
+2/3.  Claude model:
+        1) claude-sonnet-4-6   (balanced — default)
+        2) claude-opus-4-7     (smartest, slower, pricier)
+        3) claude-haiku-4-5    (fastest, cheapest)
+
+EOF
+read -rp "      Choice [1]: " MODEL_CHOICE
+case "${MODEL_CHOICE:-1}" in
+  1|"")  MODEL="claude-sonnet-4-6" ;;
+  2)     MODEL="claude-opus-4-7" ;;
+  3)     MODEL="claude-haiku-4-5" ;;
+  *)     MODEL="$MODEL_CHOICE" ;;  # pass-through for custom model names
+esac
+echo "      → $MODEL"
+echo ""
+
+# --- 6.3 Timezone ---
+cat <<'EOF'
+3/3.  Timezone (IANA name).
+      Examples: UTC, Europe/Moscow, Europe/Berlin, Asia/Tashkent,
+                Asia/Tokyo, America/New_York, America/Los_Angeles.
+
+EOF
+read -rp "      Timezone [UTC]: " TZ
+TZ="${TZ:-UTC}"
+echo "      → $TZ"
+
+# ---------- 7. Linger ----------
+echo ""
+if loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q Linger=yes; then
+  echo "✓ linger already enabled"
+else
+  echo "▶ Enabling linger (services survive logout)"
   sudo loginctl enable-linger "$USER"
   echo "✓ linger enabled"
 fi
 
-# ---------- 9. Delegate to install.sh ----------
+# ---------- 8. Delegate to install.sh ----------
+cat <<'EOF'
+
+============================================================
+  Running install.sh
+============================================================
+
+EOF
 export TELEGRAM_BOT_TOKEN="$TG_TOKEN" NANOBOT_MODEL="$MODEL" NANOBOT_TZ="$TZ"
 cd "$INSTALL_DIR"
 ./scripts/install.sh
 
-# ---------- 10. Final verification and summary ----------
+# ---------- 9. Verify ----------
+echo ""
+echo "▶ Running verify.sh"
 ./scripts/verify.sh || true
 
-whiptail --title "Done" --msgbox "\
-Installation finished!
+cat <<'EOF'
 
-Check services:
+============================================================
+  Done
+============================================================
+
+Check:
     systemctl --user status claude-shim nanobot
+    curl -s http://127.0.0.1:8787/health
+    curl -s http://127.0.0.1:18790/health
 
-Follow logs:
+Logs:
     journalctl --user -fu claude-shim
     journalctl --user -fu nanobot
 
-Send a message to your Telegram bot to test end-to-end." 16 70
+Send a message to your Telegram bot to test end-to-end.
+
+EOF

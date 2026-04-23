@@ -109,6 +109,19 @@ install -m 0644 "$REPO_DIR/systemd/nanobot.service"    "$HOME/.config/systemd/us
 sed -i "s|%h|$HOME|g" "$HOME/.config/systemd/user/claude-shim.service"
 sed -i "s|%h|$HOME|g" "$HOME/.config/systemd/user/nanobot.service"
 
+# Resolve claude binary path at install time. The unit template assumes
+# $HOME/.local/bin/claude, but npm global installs may put it in
+# /usr/local/bin or elsewhere — hardcoding breaks the unit with
+# FileNotFoundError under systemd-user (which has a minimal PATH).
+CLAUDE_PATH="$(command -v claude || true)"
+[ -n "$CLAUDE_PATH" ] || { red "claude not in PATH — cannot resolve binary"; exit 1; }
+CLAUDE_DIR="$(dirname "$CLAUDE_PATH")"
+sed -i "s|^Environment=\"CLAUDE_BIN=.*\"|Environment=\"CLAUDE_BIN=$CLAUDE_PATH\"|" \
+  "$HOME/.config/systemd/user/claude-shim.service"
+sed -i "s|PATH=$HOME/.local/bin|PATH=$CLAUDE_DIR:$HOME/.local/bin|" \
+  "$HOME/.config/systemd/user/claude-shim.service"
+green "claude resolved at $CLAUDE_PATH"
+
 # Shim working dir must exist in the location the unit expects.
 mkdir -p "$HOME/nanobot-claude-oauth/shim"
 cp -rf "$REPO_DIR/shim/"* "$HOME/nanobot-claude-oauth/shim/"

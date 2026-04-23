@@ -31,7 +31,28 @@ Telegram ─► nanobot (OpenAI-compat provider)
          api.anthropic.com  ── Claude Pro/Max subscription
 ```
 
-## Prerequisites
+## Quick install (interactive one-liner)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/smixs/nanobot-claude/main/scripts/bootstrap.sh | bash
+```
+
+Before running, do the only step that can't be automated — sign in to
+Claude Code (OAuth happens in a browser):
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude           # opens browser for Pro/Max OAuth login
+```
+
+`bootstrap.sh` then handles everything else through a TUI wizard:
+installs system deps (`whiptail`, `git`, `curl`, `jq`, `uv`), clones
+the repo into `~/nanobot-claude-oauth`, asks for your Telegram bot
+token, Claude model, and timezone, enables systemd linger, and starts
+both services. Sudo password is requested once and cached for the
+rest of the run.
+
+## Prerequisites (manual install only)
 
 * Linux VPS with **systemd**
 * `node >= 20`, `uv`, `jq`, `curl`, `systemctl`
@@ -39,11 +60,14 @@ Telegram ─► nanobot (OpenAI-compat provider)
   `~/.claude/.credentials.json` is populated
 * (For Telegram) a bot token from [@BotFather](https://t.me/BotFather)
 
-## Install
+## Advanced / manual install
+
+For CI, reinstalls, or when you want to pass configuration through
+environment variables rather than a TUI:
 
 ```bash
-git clone https://github.com/<you>/nanobot-claude-oauth.git
-cd nanobot-claude-oauth
+git clone https://github.com/smixs/nanobot-claude.git ~/nanobot-claude-oauth
+cd ~/nanobot-claude-oauth
 
 # Optional: pass TELEGRAM_BOT_TOKEN to wire up the Telegram channel in one shot
 TELEGRAM_BOT_TOKEN=123456:AA...  NANOBOT_TZ=Europe/Moscow  ./scripts/install.sh
@@ -56,7 +80,9 @@ TELEGRAM_BOT_TOKEN=123456:AA...  NANOBOT_TZ=Europe/Moscow  ./scripts/install.sh
 3. Runs `nanobot onboard` to scaffold `~/.nanobot/config.json` (if missing)
 4. Patches that config to use a `custom` provider pointed at the local shim
 5. Installs two systemd-user units (`claude-shim`, `nanobot`) and starts them
-6. Smoke-tests the shim with a `reply exactly: pong` prompt
+6. Resolves the `claude` binary path dynamically so the unit works
+   regardless of whether it's in `~/.local/bin` or `/usr/local/bin`
+7. Smoke-tests the shim with a `reply exactly: pong` prompt
 
 Verify at any time:
 ```bash

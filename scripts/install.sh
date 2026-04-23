@@ -130,9 +130,15 @@ systemctl --user daemon-reload
 systemctl --user enable --now claude-shim.service
 systemctl --user enable --now nanobot.service
 
-# Enable linger so user services survive logout.
-if ! loginctl show-user "$USER" -p Linger | grep -q Linger=yes; then
-  yellow "Tip: run 'sudo loginctl enable-linger $USER' so services keep running after logout."
+# Enable linger so user services survive logout. Try non-interactively
+# first (works if bootstrap.sh already cached sudo or NOPASSWD is set);
+# fall back to a visible tip if sudo would need a password.
+if ! loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q Linger=yes; then
+  if sudo -n loginctl enable-linger "$USER" 2>/dev/null; then
+    green "linger enabled"
+  else
+    yellow "Tip: sudo loginctl enable-linger $USER  (needs password; otherwise services die on logout)"
+  fi
 fi
 
 # ---------- 6. smoke test ----------

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Mock claude CLI for CI. Returns fixed JSON matching the shape
+# server.py expects from `claude -p ... --output-format json`.
+# Real claude requires browser-based OAuth which cannot run in CI.
+case "${1:-}" in
+  --version)
+    echo "claude 2.9.9 (mock)"
+    exit 0
+    ;;
+  -p)
+    cat <<'JSON'
+{"result":"pong","usage":{"input_tokens":5,"output_tokens":2},"stop_reason":"end_turn"}
+JSON
+    exit 0
+    ;;
+esac
+echo "fake-claude: unsupported args: $*" >&2
+exit 2

@@ -123,8 +123,12 @@ sed -i "s|PATH=$HOME/.local/bin|PATH=$CLAUDE_DIR:$HOME/.local/bin|" \
 green "claude resolved at $CLAUDE_PATH"
 
 # Shim working dir must exist in the location the unit expects.
+# Skip the copy when the repo is already at the canonical location —
+# otherwise `cp -rf src/* dst/` errors out with "are the same file".
 mkdir -p "$HOME/nanobot-claude-oauth/shim"
-cp -rf "$REPO_DIR/shim/"* "$HOME/nanobot-claude-oauth/shim/"
+if [ ! "$REPO_DIR/shim" -ef "$HOME/nanobot-claude-oauth/shim" ]; then
+  cp -rf "$REPO_DIR/shim/"* "$HOME/nanobot-claude-oauth/shim/"
+fi
 
 systemctl --user daemon-reload
 systemctl --user enable --now claude-shim.service

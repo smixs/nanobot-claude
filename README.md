@@ -31,31 +31,106 @@ Telegram ─► nanobot (OpenAI-compat provider)
          api.anthropic.com  ── Claude Pro/Max subscription
 ```
 
-## Quick install (interactive one-liner)
+## Fresh server setup — step by step
+
+Follow these steps in order on a brand-new Linux VPS (tested on Ubuntu 22.04 / 24.04).
+**Everything from step 4 onwards runs as a dedicated non-root user** —
+this is required because Claude Code refuses to run with
+`--dangerously-skip-permissions` under root, and our shim needs that flag.
+
+### 1. SSH into the VPS as root
+
+```bash
+ssh root@<your-vps-ip>
+```
+
+### 2. Create a non-root user (one-time, as root)
+
+Pick any name — this guide uses `claude`. You will log in with this
+account from now on; never as root.
+
+```bash
+# Create the user (will prompt for a password — remember it,
+# you'll use it to SSH in later). Hit Enter through the name/phone fields.
+adduser claude
+
+# Grant sudo rights WITHOUT a password prompt, so the installer can run
+# non-interactively. Remove this file later if you want stricter security.
+usermod -aG sudo claude
+echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude
+chmod 440 /etc/sudoers.d/claude
+
+# Keep user services alive after SSH logout. Must be run as root —
+# regular users cannot enable linger for themselves.
+loginctl enable-linger claude
+```
+
+### 3. Install Node.js and Claude Code CLI (still as root)
+
+Claude Code needs Node ≥ 20. Ubuntu 24.04 ships with Node 20; on 22.04 add
+the NodeSource repo first (`curl -fsSL https://deb.nodesource.com/setup_20.x | bash -`).
+
+```bash
+apt update
+apt install -y nodejs npm
+npm install -g @anthropic-ai/claude-code
+```
+
+Installing `claude` system-wide means every user on the box can run it —
+we only OAuth once, in step 4.
+
+### 4. Switch to the `claude` user and sign in to Claude Code
+
+```bash
+su - claude          # becomes the new user; prompt will change
+claude               # prints a URL — open it in YOUR LOCAL browser,
+                     # complete Pro/Max OAuth, paste the code back
+```
+
+When `claude` shows a REPL prompt after the browser flow, the token is
+saved to `~/.claude/.credentials.json`. Hit `Ctrl-D` or type `/exit` to
+leave the REPL. Do **not** skip this step — the installer checks for that
+file and will abort without it.
+
+### 5. Run the one-liner installer (as `claude`)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/smixs/nanobot-claude/main/scripts/bootstrap.sh | bash
 ```
 
-Before running, do the only step that can't be automated — sign in to
-Claude Code (OAuth happens in a browser):
+The installer asks three questions:
+
+1. **Telegram bot token** — get one from [@BotFather](https://t.me/BotFather); leave blank to skip Telegram entirely (you can enable it later in `~/.nanobot/config.json`)
+2. **Claude model** — `claude-sonnet-4-6` (default), `claude-opus-4-7`, or `claude-haiku-4-5`
+3. **Timezone** — IANA name, e.g. `Europe/Moscow`, `UTC`, `Asia/Tashkent`
+
+It then installs dependencies (`git`, `curl`, `jq`, `uv`), clones the
+repo into `~/nanobot-claude-oauth`, patches `~/.nanobot/config.json`
+to point at the local shim, installs and starts two systemd-user
+services (`claude-shim` on port 8787, `nanobot` on port 18790),
+and runs a smoke test. Total time ≈ 2 minutes. Sudo password is
+not prompted thanks to the NOPASSWD rule in step 2.
+
+### 6. From now on, SSH in as `claude` — not root
 
 ```bash
-npm install -g @anthropic-ai/claude-code
-claude           # opens browser for Pro/Max OAuth login
+# Don't do this anymore:
+ssh root@<vps>
+
+# Do this:
+ssh claude@<vps>
 ```
 
-`bootstrap.sh` then handles everything else through a TUI wizard:
-installs system deps (`whiptail`, `git`, `curl`, `jq`, `uv`), clones
-the repo into `~/nanobot-claude-oauth`, asks for your Telegram bot
-token, Claude model, and timezone, enables systemd linger, and starts
-both services. Sudo password is requested once and cached for the
-rest of the run.
+Everything lives under `/home/claude` — services, configs, logs.
+Services auto-start on boot thanks to `linger`.
+
+Send a message to your Telegram bot to verify end-to-end.
 
 ## Prerequisites (manual install only)
 
 * Linux VPS with **systemd**
 * `node >= 20`, `uv`, `jq`, `curl`, `systemctl`
+* **A non-root user with sudo rights** — Claude Code refuses to run with `--dangerously-skip-permissions` under root
 * **Claude Code** installed and signed in: `claude` once interactively so
   `~/.claude/.credentials.json` is populated
 * (For Telegram) a bot token from [@BotFather](https://t.me/BotFather)
@@ -63,7 +138,9 @@ rest of the run.
 ## Advanced / manual install
 
 For CI, reinstalls, or when you want to pass configuration through
-environment variables rather than a TUI:
+environment variables rather than answering the bootstrap prompts.
+Must still run as a non-root user (see step 2 of the fresh-server
+guide above):
 
 ```bash
 git clone https://github.com/smixs/nanobot-claude.git ~/nanobot-claude-oauth
